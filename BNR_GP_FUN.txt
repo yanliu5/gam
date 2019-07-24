@@ -1,0 +1,90 @@
+
+#######################################################################
+# R function: This function is used to nonparametrically estimate a single unknown function of continuous 
+#             covariate using Full Gaussian Process. 
+# This function is used within BNR_GP
+#
+#
+# 
+#
+#
+#
+
+Bayes.GP.FUN<-function(eta_other_iter,M_mat,U_iter,Vb_iter,D,P_iter_inv,mcx,tau_iter,id0_mcx,a,b,phi_set,
+                       x_dist,P_iter_chol){
+
+########################################################################### update eta for fun
+# eta_oter_iter is the sum of all other eat vectors corresponding to other functions
+# e.g., eta_oter_iter <- eta_2_iter
+# M_mat <- M_mat_j
+# U_iter <- U_iter
+# Vb_iter <- Vb_iter
+# D <- D_j
+# P_iter_inv <- P_j_w_inv
+# tau_iter <- tau_j_iter
+# K <- K_j
+# id0_mcx <- id0_mcx_1
+# a <- a_j; b <- b_j
+# x_dist <- x_dist_1
+
+K <- length(mcx)
+phi_iter <- phi_set[1]
+trphi_iter <- phi_set[2]
+phi_min <- phi_set[3]
+phi_max <- phi_set[4]
+
+
+MU_iter <- crossprod(M_mat,U_iter-Vb_iter-eta_other_iter)
+DP = forceSymmetric(D+P_iter_inv*tau_iter)
+Sig_eta_iter_decomp =chol(DP) # decomposition of presicion matrix
+Sig_eta_iter = chol2inv(Sig_eta_iter_decomp) # covariance matrix
+mu_eta_iter = Sig_eta_iter%*%MU_iter   # mean of eta_iter
+
+eta_x_iter = as.numeric(backsolve(Sig_eta_iter_decomp,rnorm(K))+mu_eta_iter) # sample from presicion matrix,solve uptri system
+
+#if(id0_mcx==0){
+#  PP_cross = matrix(matern(abs(0-mcx),phi=phi_iter,kappa=kap),nrow=1)
+#  CC_new = PP_cross%*%P_iter_inv
+#  AA <- 1-diag(tcrossprod(CC_new,PP_cross))
+#  AA[AA<=0] <- 0
+#  eta_x_iter <- eta_x_iter-rnorm(1,CC_new%*%eta_x_iter,AA/tau_iter)
+#}else{eta_x_iter <- eta_x_iter-eta_x_iter[id0_mcx]}
+
+eta_x_iter <- eta_x_iter - mean(eta_x_iter)
+eta_iter = as.numeric(M_mat%*%eta_x_iter)
+
+########################################################################### update tau
+bb = crossprod(eta_x_iter,P_iter_inv)%*%eta_x_iter/2
+a_star=a+K/2;b_star=as.numeric(b+bb)
+tau_iter = rgamma(1,a_star,b_star)
+
+########################################################################### update phi in Matern covariance function
+### using normal distribution as the proposal distribution for trphi=log(phi)
+
+trphi_new = rnorm(1,trphi_iter,trphi_tune)
+phi_new = (exp(trphi_new)*phi_max+phi_min)/(1+exp(trphi_new))
+########################################################################### update the covariance matrix
+P_new = matern(x_dist, phi= phi_new, kappa = kap)
+P_new_chol = chol(P_new)
+P_new_inv = chol2inv(P_new_chol)
+
+rat1 =  -sum(log(diag(P_new_chol)))-crossprod(eta_x_iter,P_new_inv)%*%eta_x_iter/2*tau_iter
+rat2 =  -sum(log(diag(P_iter_chol)))-bb*tau_iter
+
+rat_2 = (phi_new-phi_min)*(phi_max-phi_new)/((phi_max-phi_iter)*(phi_iter-phi_min))
+rat = min(1,as.numeric(exp(rat1-rat2)*rat_2))
+
+ber_rat = rbinom(1,1,rat)
+phi_iter = ber_rat*phi_new+(1-ber_rat)*phi_iter
+trphi_iter = ber_rat*trphi_new + (1-ber_rat)*trphi_iter
+
+########################################################################### update matrix
+if(ber_rat==1){ # if phi_new was accepted, then update all matrics
+  #P_iter = P_new 
+  P_iter_chol = P_new_chol
+  P_iter_inv = P_new_inv
+}
+
+return(list("eta_x"=eta_x_iter,"eta"=eta_iter,"tau"=tau_iter,"phi"=phi_iter,
+            "trphi"=trphi_iter,"P_iter_chol"=P_iter_chol,"P_iter_inv"=P_iter_inv ))
+}
