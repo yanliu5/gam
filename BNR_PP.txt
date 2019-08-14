@@ -224,8 +224,10 @@ Bayes.PP<-function(Z,Y,Y_obs,D_1,mcx_1,mcw_1,D_2,mcx_2,mcw_2,phi_ini,
       AA_2[AA_2<=0] <- 0
       eta_new_2[,ikeep] <- rnorm(KK_2,CC_new_2%*%eta_w_2_iter,AA_2/tau_2_iter)
       
-      
-      print(ikeep)
+      if(ikeep%%(n.keep/5)==0){
+				print(paste0("Collected ",(ikeep%/%(n.keep/5))*20,"% of required sample"))
+			}
+			
       ikeep <- ikeep + 1
       
     }

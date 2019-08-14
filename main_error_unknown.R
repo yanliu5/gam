@@ -4,15 +4,7 @@
 # which are individual test, Master pool test, Dorfman test and Array test
 # Here we assume that the testing error is unknown and will estimate its parameters
 #############################################################################################
-
-
-source("BNR_GP_05072017.txt")
-source("BNR_GP_FUN_05072017.txt")
-source("BNR_PP_05072017.txt")
-source("BNR_PP_FUN_05072017.txt")
-source("Testing functions.txt")
-Rcpp::sourceCpp("SampLatent.cpp")
-Rcpp::sourceCpp("ErrorUpdate.cpp")
+# The most current version of Rtools is needed for compiling .cpp file
 
 library(mvtnorm)
 library(msm)
@@ -20,7 +12,15 @@ library(ltsa)
 library(geoR)
 library(Matrix)
 library(coda)
+library(Rcpp)
 
+source("BNR_GP.txt")
+source("BNR_GP_FUN.txt")
+source("BNR_PP.txt")
+source("BNR_PP_FUN.txt")
+source("Testing functions.txt")
+Rcpp::sourceCpp("SampLatent.cpp")
+Rcpp::sourceCpp("ErrorUpdate.cpp")
 
 ##########################################################################################
 # Specify the number of Gibbs iterates and prior parameters
@@ -65,7 +65,7 @@ f4 <- function(x,a=1,b=1.5,c=4){
 lrow   <- 7268          # Length of row; will use it to fill with NA in case error happened
 nIter  <- 500           # Number of simulated dataset
 
-
+mat    <- c()
 sim    <- 1
 
 ################################################################################################
@@ -236,7 +236,7 @@ while(sim <=nIter){
 	# Fit Dorfman Test data using Gaussian Predictive Process
 	#
 	# ===============================================================================
-
+	print(paste0("Start MCMC for Dorfman Test data using GPP process in the data set #",sim))
 	t1 <- proc.time()
 	res2<-try(Bayes.PP(Z=Z.dorf,Y=Y.dorf,Y.dorf_obs,D_1,mcx_1,mcw_1,
 				   D_2,mcx_2,mcw_2,phi_ini,
@@ -274,7 +274,7 @@ while(sim <=nIter){
 	# Fit Dorfman Test data using Regular Gaussian Process
 	#
 	# ===============================================================================
-
+	print(paste0("Start MCMC for Dorfman Test data using GP process in the data set #",sim))
 	t1 <- proc.time()
 	res1<-try(Bayes.GP(Z=Z.dorf,Y=Y.dorf,Y.dorf_obs,D_1,mcx_1,D_2,mcx_2,
 				   phi_ini,trphi_tune,sample.parameter,kap,na=length(Se.t),
@@ -305,10 +305,10 @@ while(sim <=nIter){
 			Eta_1.new,Eta_1.mean,Eta_1.med,Eta_1.sd,Eta_1.bd,
 			Eta_2.new,Eta_2.mean,Eta_2.med,Eta_2.sd,Eta_2.bd)}else{DT_GP<-rep(NA,lrow)}
 
-	#################################################################################
-	# Fit Array Test data using Gaussian Predictive Process
-	#
-	# ===============================================================================
+	################################################################################## 
+	# Array Test
+	# Data generated from individual test data
+	##################################################################################
 	# Simulates array testing  
 	test.res<-Array.decode.diff.error(Y_true, Se.t, Sp.t, cj=cj)
 	Z.array<-test.res$Z
@@ -317,7 +317,11 @@ while(sim <=nIter){
 	Y.array_obs[Y.array[,2]==2] <- 0
 	id_2 <- Y.array[,2]==3 
 	Y.array_obs[id_2] <- Z.array[Y.array[id_2,5]]
-
+	#################################################################################
+	# Fit Array Test data using Gaussian Predictive Process
+	#
+	# ===============================================================================
+	print(paste0("Start MCMC for Array Test data using GPP process in the data set #",sim))
 	t1 <- proc.time()
 	res2<-try(Bayes.PP(Z=Z.array,Y=Y.array,Y.array_obs,D_1,mcx_1,mcw_1,
 				   D_2,mcx_2,mcw_2,phi_ini,
@@ -353,7 +357,7 @@ while(sim <=nIter){
 	# Fit Array Test data using Regular Gaussian Process
 	#
 	# ===============================================================================
-
+	print(paste0("Start MCMC for Dorfman Test data using GP process in the data set #",sim))
 	t1 <- proc.time()
 	res1<-try(Bayes.GP(Z=Z.array,Y=Y.array,Y.array_obs,D_1,mcx_1,D_2,mcx_2,
 				   phi_ini,trphi_tune,sample.parameter,kap,na=length(Se.t),
@@ -401,7 +405,7 @@ while(sim <=nIter){
 
 fname <- paste0(N,'_error_mod',mod,'.RData')
 
-save(lmat,file=fname)
+save(mat,rbeta,file=fname)
 
 
 

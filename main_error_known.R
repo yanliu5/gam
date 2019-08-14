@@ -4,9 +4,7 @@
 # which are individual test, Master pool test, Dorfman test and Array test
 # Here we assume that the testing error is known
 #############################################################################################
-
-
-
+# The most current version of Rtools is needed for compiling .cpp file
 
 library(mvtnorm)
 library(msm)
@@ -14,6 +12,7 @@ library(ltsa)
 library(geoR)
 library(Matrix)
 library(coda)
+library(Rcpp)
 
 source("BNR_GP.txt")
 source("BNR_GP_FUN.txt")
@@ -68,7 +67,7 @@ f4 <- function(x,a=1,b=1.5,c=4){
 lrow   <- 7248          # Length of row; will use it to fill with NA in case error happened
 nIter  <- 500           # Number of simulated dataset
 
-
+mat    <- c()
 sim    <- 1
 
 ################################################################################################
@@ -233,6 +232,7 @@ while(sim <=nIter){
 	# Fit Individual Test data using Gaussian Predictive Process
 	#
 	# ===============================================================================
+	print(paste0("Start MCMC for Individual Test data using GPP process in the data set #",sim))
 	t1 <- proc.time()
 	res2<-Bayes.PP(Z=Z.it,Y=Y.it,Y.it_obs,D_1,mcx_1,mcw_1,
 				   D_2,mcx_2,mcw_2,phi_ini,
@@ -271,7 +271,7 @@ while(sim <=nIter){
 	# Fit Individual Test data using Regular Gaussian Process
 	#
 	# ===============================================================================
-
+	print(paste0("Start MCMC for Individual Test data using GP process in the data set #",sim))
 	t1 <- proc.time()
 	res1<-try(Bayes.GP(Z=Z.it,Y=Y.it,Y.it_obs,D_1,mcx_1,D_2,mcx_2,
 				   phi_ini,trphi_tune,sample.parameter,kap,na=1,
@@ -321,6 +321,7 @@ while(sim <=nIter){
 	# Fit Master Pool Test data using Gaussian Predictive Process
 	#
 	# ===============================================================================
+	print(paste0("Start MCMC for Masterpool Test data using GPP process in the data set #",sim))
 	t1 <- proc.time()
 	res2<-try(Bayes.PP(Z=Z.pool,Y=Y.pool,Y.master_obs,D_1,mcx_1,mcw_1,
 				   D_2,mcx_2,mcw_2,phi_ini,
@@ -358,7 +359,7 @@ while(sim <=nIter){
 	# Fit Master Pool Test data using Regular Gaussian Process
 	#
 	# ===============================================================================
-
+	print(paste0("Start MCMC for Masterpool Test data using GP process in the data set #",sim))
 	t1 <- proc.time()
 	res1<-try(Bayes.GP(Z=Z.pool,Y=Y.pool,Y.master_obs,D_1,mcx_1,D_2,mcx_2,
 				   phi_ini,trphi_tune,sample.parameter,kap,na=1,
@@ -410,7 +411,7 @@ while(sim <=nIter){
 	# Fit Dorfman Test data using Gaussian Predictive Process
 	#
 	# ===============================================================================
-
+	print(paste0("Start MCMC for Dorfman Test data using GPP process in the data set #",sim))
 	t1 <- proc.time()
 	res2<-try(Bayes.PP(Z=Z.dorf,Y=Y.dorf,Y.dorf_obs,D_1,mcx_1,mcw_1,
 				   D_2,mcx_2,mcw_2,phi_ini,
@@ -447,7 +448,7 @@ while(sim <=nIter){
 	# Fit Dorfman Test data using Regular Gaussian Process
 	#
 	# ===============================================================================
-
+	print(paste0("Start MCMC for Dorfman Test data using GP process in the data set #",sim))
 	t1 <- proc.time()
 	res1<-try(Bayes.GP(Z=Z.dorf,Y=Y.dorf,Y.dorf_obs,D_1,mcx_1,D_2,mcx_2,
 				   phi_ini,trphi_tune,sample.parameter,kap,na=length(Se.t),
@@ -498,7 +499,7 @@ while(sim <=nIter){
 	# Fit Array Test data using Gaussian Predictive Process
 	#
 	# ===============================================================================
-
+	print(paste0("Start MCMC for Array Test data using GPP process in the data set #",sim))
 	t1 <- proc.time()
 	res2<-try(Bayes.PP(Z=Z.array,Y=Y.array,Y.array_obs,D_1,mcx_1,mcw_1,
 				   D_2,mcx_2,mcw_2,phi_ini,
@@ -535,7 +536,7 @@ while(sim <=nIter){
 	# Fit Array Test data using Regular Gaussian Process
 	#
 	# ===============================================================================
-
+	print(paste0("Start MCMC for Dorfman Test data using GP process in the data set #",sim))
 	t1 <- proc.time()
 	res1<-try(Bayes.GP(Z=Z.array,Y=Y.array,Y.array_obs,D_1,mcx_1,D_2,mcx_2,
 				   phi_ini,trphi_tune,sample.parameter,kap,na=length(Se.t),
@@ -587,7 +588,7 @@ while(sim <=nIter){
 
 fname <- paste0(N,'_noerror_mod',mod,'.RData')
 
-save(mat,file=fname)
+save(mat,rbeta,file=fname)
 
 
 
