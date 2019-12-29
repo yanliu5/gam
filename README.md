@@ -7,4 +7,5 @@ This repository contains R programs for the article, “Generalized additive reg
    (Individual Test, Master Pool Test, Dorfman Test and Array Test), run <b>main_error_known.R</b>
 2. To reproduce <b>Table 2</b> in the manuscript; i.e., analyze outcome from two testing procedures 
    (Dorfman Test and Array Test), run <b>main_error_unknown.R</b>
+3. <b>Simulated_dataset.csv</b> is the simulated data set that very closely resembles the Iowa data set analyzed in Section 4 of the manuscript.
 <pre>
