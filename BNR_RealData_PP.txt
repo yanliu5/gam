@@ -1,0 +1,216 @@
+
+#######################################################################
+# R function: This function fits a binary regression model to group testing 
+#             data according to the Bayesian Nonparametric Regression methods using Full Gaussian Process.
+# Input:
+# Z = A matrix of testing responses whose jth row is of the form (col1=Z_j, col2=cj, col3=assay used, col4:col(4+cj-1)=indices of the individuals assigned to the jth pool) 
+# X = Covariate matrix in which the ith row contains the covariate information pertaining to the ith individual
+# Y = matrix whose ith row is of the form (col1=0, col2=number of pools ith individual involved in, col3:col(3+col2-1)=pools ith individual was assigned to)
+# GI = The number of Gibbs iterates 
+# b0 = Initialization value for the regression parameters
+# na = Number of different assays being used
+# ase(bse) = prior parameters for the testing sensitivities, if these values are to be estimated, note these should be of length na (Assuming a beta prior)
+# asp(bsp) = prior parameters for the testing specificities, if these values are to be estimated, note these should be of length na (Assuming a beta prior)
+# Se = vector of sensitivity values, if known
+# Sp = vector of specificity values, if known
+# est.error = logical if FALSE function uses the known Se and Sp to fit model, if TRUE Se and Sp are estimated along with the other parameters
+# (a,R)     = The prior mean vector (a) and covariance matrix (R)
+#
+#
+# Required Packages: geoR
+#
+#
+#
+
+Bayes.NPReg.GT.PP<-function(Z,Y,Y_obs,D,mcx,mcw,n.burn,n.keep,n.thin,n.step,trphi_tune,phi_min,phi_max,phi_0,kap,na, 
+                             ase=rep(1,na), bse=rep(1,na), 
+                             asp=rep(1,na), bsp=rep(1,na), Se=NULL, Sp=NULL, est.error=FALSE, visual=FALSE, step=50){
+  X_new <- seq(min(mcx),max(mcx),by=0.01);KK <- length(X_new)
+  Y_save <- matrix(NA,N,n.keep)
+  J = nrow(Z)
+  K = length(mcx);L=length(mcw)
+  N = nrow(Y)
+  count_inverse = 0;count_inverse_new = 0
+  if(est.error==TRUE){
+    Se.mat<-matrix(-99,nrow=na,ncol=n.keep)
+    Sp.mat<-matrix(-99,nrow=na,ncol=n.keep)
+  }
+  ############################### calculate the distance matrix
+  x_dist = as.matrix(dist(mcx,mcx, method = "manhattan", diag = FALSE, upper = FALSE))
+  knots_dist = as.matrix(dist(mcw,mcw, method = "manhattan", diag = FALSE, upper = FALSE))
+  cross_dist = matrix(NA,K,L)
+  new_cross_dist <- matrix(NA,KK,L)
+  for(j in 1:L){
+    cross_dist[,j] <- abs(mcx-mcw[j])
+    new_cross_dist[,j] <- abs(X_new-mcw[j])
+  }
+  
+  ############################### speficy the initial values of unknown parameters and random terms
+  #eta_ini <- qnorm(mean(Y_obs))
+  eta_ini <- 0
+  eta_iter=rep(eta_ini,N);eta_x_iter = rep(eta_ini,K);eta_w_iter = rep(eta_ini,L)
+  a=2;b=1;tau_iter = rgamma(1,a,b)
+  U_iter = rep(0,N)
+  beta_iter =rep(0.0,ncol(V));beta_iter[1]<-qnorm(mean(Y_obs));Vb_iter = V%*%beta_iter
+  Sig_inv_beta=diag(rep(1/1000,length(beta_iter)))
+
+  logit <- function(x){log(x/(1-x))}
+  phi_iter = phi_0;trphi_iter = logit((phi_iter-phi_min)/(phi_max-phi_min))
+  #Se <- 0.95;Sp <- 0.95
+  ############################### create the matrix to store posterior samples
+  #eta_x = matrix(NA,N,n.keep)
+  eta_w = matrix(NA,L,n.keep)
+  #eta_new <- matrix(NA,KK+2,n.keep)
+  eta_new <- matrix(NA,KK,n.keep)
+  eta_mat <- matrix(NA,N,n.keep)
+  tau = rep(NA,n.keep)
+  phi = rep(NA,n.keep)
+  beta = matrix(NA,length(beta_iter),n.keep)
+  ############################### create the distance matrix and correlation matrix
+  x.dist_row = knots_dist[1,]
+  P_w = toeplitz(matern(x.dist_row, phi= phi_iter, kappa = kap)) # P star matrix
+  P_w_inv <- TrenchInverse(P_w)
+  P_xw = matern(cross_dist,phi=phi_iter,kappa=kap) # correlation matrix of x and x.knots
+  C_star = P_xw%*%P_w_inv
+  ############################### initialize Y_obs
+  Y[,1] = Y_obs
+  y = Y[,1]
+  id0 = (y==0)
+  id1 = (y==1)
+  ##########################
+  #GIBBS SAMPLER STARTS HERE
+  iter = 1
+  ikeep = 1
+  GI = n.burn + n.thin*n.keep
+  accept.phi = 0
+  while(iter<=GI){
+    if(visual==TRUE&iter>n.burn&iter%%n.step==0){
+      par(mfrow=c(3,2),mar=c(2,2,2,1))
+      plot(eta_new[1,1:ikeep],type="l")
+      plot(eta_new[round(KK/3),1:ikeep],type="l")
+      plot(eta_new[round(KK/3*2),1:ikeep],type="l")
+      plot(eta_new[KK,1:ikeep],type="l")
+      plot(tau[1:ikeep],type="l")
+      plot(phi[1:ikeep],type="l")
+    }
+    
+  #################################################################################
+  #################################################################################
+  #################################################################################
+  
+  ########################################################################### update Se and Sp
+  if(est.error==TRUE){
+  ###################
+  #Sampling Se and Sp
+    PS<-matrix(0,nrow=na,ncol=4)
+
+    res<-errorupdate(N,J,Y,Z,PS,na)
+    Se.up<-matrix(res[,1:2],na,2)
+    Sp.up<-matrix(res[,3:4],na,2)
+   
+    Se<-rbeta(na,ase+Se.up[,1],bse+Se.up[,2])
+    Sp<-rbeta(na,asp+Sp.up[,1],bsp+Sp.up[,2])
+    }
+
+   ########################################################################### update U
+    U_iter[id0] = rtnorm(sum(id0), mean=(eta_iter+Vb_iter)[id0], sd=1, lower=-Inf, upper=0)
+    U_iter[id1] = rtnorm(sum(id1), mean=(eta_iter+Vb_iter)[id1], sd=1, lower=0, upper=Inf)
+    MU_iter <- crossprod(M_mat,U_iter-Vb_iter)
+
+    ########################################################################### update beta
+    beta_sig = solve(VtV+Sig_inv_beta);beta_mu=beta_sig%*%crossprod(V,U_iter-eta_iter)
+    beta_iter = as.numeric(rmvnorm(1,beta_mu,beta_sig))
+    Vb_iter = V%*%beta_iter
+
+    ########################################################################### update eta_star and eta
+    DP = forceSymmetric(crossprod(C_star,D)%*%C_star+P_w_inv*tau_iter)
+    Sig_eta_iter_decomp =chol(DP) # decomposition of presicion matrix
+    Sig_eta_iter = chol2inv(Sig_eta_iter_decomp) # covariance matrix
+    mu_eta_iter = Sig_eta_iter%*%crossprod(C_star,MU_iter)   # mean of eta_iter
+  
+    eta_w_iter = as.numeric(backsolve(Sig_eta_iter_decomp,rnorm(L))+mu_eta_iter) # sample from presicion matrix,solve uptri system
+	  #eta_w_iter <- eta_w_iter - eta_w_iter[id0_mcw]
+	  eta_w_iter <- eta_w_iter - mean(eta_w_iter)
+    eta_x_iter = C_star%*%eta_w_iter
+    eta_iter = M_mat%*%eta_x_iter
+
+    #################################### update tau
+    bb = crossprod(eta_w_iter,P_w_inv)%*%eta_w_iter/2
+    a_star=a+L/2;b_star=as.numeric(b+bb)
+    tau_iter = rgamma(1,a_star,b_star)
+
+    ########################################################################### update phi in Matern covariance function
+    ### using normal distribution as the proposal distribution for trphi=log(phi)
+    trphi_new = rnorm(1,trphi_iter,trphi_tune)
+    phi_new = (exp(trphi_new)*phi_max+phi_min)/(1+exp(trphi_new))
+  
+    ########################################################################### update the covariance matrix
+    P_w_new = toeplitz(matern(x.dist_row, phi= phi_new, kappa = kap)) # Correlation matrix of x.knots, which is also a toeplitz matrix
+    P_w_inv_new = TrenchInverse(P_w_new) # Inverse the Correlation matrix of x.knots
+  
+    P_xw_new = matern(cross_dist,phi=phi_new,kappa=kap) # correlation matrix of x and x.knots
+    C_star_new = P_xw_new%*%P_w_inv_new
+  
+    C_star_eta_new = U_iter-M_mat%*%C_star_new%*%eta_w_iter-Vb_iter
+    C_star_eta = U_iter-eta_iter-Vb_iter
+  
+    rat1= -determinant(P_w_new)$modulus/2-tau_iter*crossprod(eta_w_iter,P_w_inv_new)%*%eta_w_iter/2-crossprod(C_star_eta_new)/2
+    rat2= -determinant(P_w)$modulus/2-tau_iter*crossprod(eta_w_iter,P_w_inv)%*%eta_w_iter/2-crossprod(C_star_eta)/2
+  
+    rat_2 = (phi_new-phi_min)*(phi_max-phi_new)/((phi_max-phi_iter)*(phi_iter-phi_min))
+    rat = min(1,as.numeric(exp(rat1-rat2)*rat_2))
+  
+    ber_rat = rbinom(1,1,rat)
+    phi_iter = ber_rat*phi_new+(1-ber_rat)*phi_iter
+    trphi_iter = ber_rat*trphi_new + (1-ber_rat)*trphi_iter
+    accept.phi = accept.phi + ber_rat  
+  
+    ########################################################################### update matrix
+    if(ber_rat==1){ # if phi_new was accepted, then update all matrics
+      P_w <- P_w_new # P star matrix
+      P_w_inv <- P_w_inv_new
+      P_xw <- P_xw_new # correlation matrix of x and x.knots
+      C_star <- C_star_new    
+    }
+  
+    ########################################################################### update the latent variable Y
+    # Sample true status Y
+    p = pnorm(as.numeric(eta_iter+Vb_iter))
+    uf<-runif(N)
+    Y[,1] = SampLatent(N,p,Y=Y,Z=Z,U=uf,se=Se, sp=Sp,na=1)
+    y = Y[,1]
+    id0 = (y==0)
+    id1 = (y==1)
+
+    if(iter>n.burn&iter%%n.thin==0){
+
+      eta_w[,ikeep] <- eta_w_iter
+      #eta_x[,ikeep] <- as.numeric(eta_iter)
+      beta[,ikeep] <- beta_iter
+      tau[ikeep] = tau_iter
+      phi[ikeep] = phi_iter
+      Se.mat[,ikeep]<-Se
+      Sp.mat[,ikeep]<-Sp
+
+      PP_cross_new = matern(new_cross_dist,phi=phi_iter,kappa=kap)
+      CC_new = PP_cross_new%*%P_w_inv
+      AA <- rep(1,KK)-diag(tcrossprod(CC_new,PP_cross_new))
+      AA[AA<=0] <- 0
+      eta_new[,ikeep] <- rnorm(KK,CC_new%*%eta_w_iter,AA/tau_iter)
+	    eta_mat[,ikeep] <- as.numeric(eta_iter)
+	    Y_save[,ikeep] <- y
+			
+			if(ikeep%%(n.keep/10)==0){
+				print(paste0("Collected ",(ikeep%/%(n.keep/10))*10,"% of required sample"))
+			}
+			
+      ikeep <- ikeep + 1
+
+    }
+
+    iter = iter + 1
+    
+  } # End Gibbs sampling 
+
+  return(list("Se"=Se.mat,"Sp"=Sp.mat,"eta_new"=eta_new,"eta_w"=eta_w,"eta_mat"=eta_mat,"tau"=tau,"phi"=phi,"beta"=beta,"X_new"=X_new,"Y_save"=Y_save))
+}

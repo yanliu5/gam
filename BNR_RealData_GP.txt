@@ -1,0 +1,227 @@
+
+#######################################################################
+# R function: This function fits a binary regression model to group testing 
+#             data according to the Bayesian Nonparametric Regression methods using Full Gaussian Process.
+# Input:
+# Z = A matrix of testing responses whose jth row is of the form (col1=Z_j, col2=cj, col3=assay used, col4:col(4+cj-1)=indices of the individuals assigned to the jth pool) 
+# X = Covariate matrix in which the ith row contains the covariate information pertaining to the ith individual
+# Y = matrix whose ith row is of the form (col1=0, col2=number of pools ith individual involved in, col3:col(3+col2-1)=pools ith individual was assigned to)
+# GI = The number of Gibbs iterates 
+# b0 = Initialization value for the regression parameters
+# na = Number of different assays being used
+# ase(bse) = prior parameters for the testing sensitivities, if these values are to be estimated, note these should be of length na (Assuming a beta prior)
+# asp(bsp) = prior parameters for the testing specificities, if these values are to be estimated, note these should be of length na (Assuming a beta prior)
+# Se = vector of sensitivity values, if known
+# Sp = vector of specificity values, if known
+# est.error = logical if FALSE function uses the known Se and Sp to fit model, if TRUE Se and Sp are estimated along with the other parameters
+# (a,R)     = The prior mean vector (a) and covariance matrix (R)
+#
+#
+# Required Packages: geoR
+#
+#
+#
+ 
+Bayes.GP<-function(Z,Y,Y_obs,D,mcx,phi_ini, 
+                             trphi_tune,sample.parameter,kap,na,
+                             ase=rep(1,na), bse=rep(1,na), 
+                             asp=rep(1,na), bsp=rep(1,na), Se=NULL, Sp=NULL, 
+                             est.error=FALSE, visual=FALSE, step=50){
+                             
+  phi_min <- phi_ini[1];phi_max<-phi_ini[2]
+
+  n.burn <- sample.parameter[1]
+  n.keep <- sample.parameter[2]
+  n.thin <- sample.parameter[3]
+  n.step <- sample.parameter[4]
+
+  J = nrow(Z);N <- nrow(Y)
+  K <- length(mcx)
+
+  count_inverse <- 0;count_inverse_new <- 0
+  if(est.error==TRUE){
+    Se.mat<-matrix(-99,nrow=na,ncol=n.keep)
+    Sp.mat<-matrix(-99,nrow=na,ncol=n.keep)
+  }
+  
+  #################################################### calculate the distance matrix for fun.1
+  x_dist <- as.matrix(dist(mcx,mcx, method = "manhattan", diag = FALSE, upper = FALSE))
+
+  #################################################### speficy the initial values of unknown parameters and random terms
+  #eta_ini <- qnorm(mean(Y_obs))
+  eta_ini <- 0
+  logit <- function(x){log(x/(1-x))}
+  #################################################### configure Gaussian Process for fun.1
+  eta_iter=rep(eta_ini,N);eta_x_iter = rep(eta_ini,K)
+  a=2;b=1;tau_iter = rgamma(1,a,b)
+  phi_iter <- (phi_min+phi_max)/2
+  trphi_iter <- logit((phi_iter-phi_min)/(phi_max-phi_min))
+
+  #########################################################################################
+  U_iter = rep(0,N)
+  beta_iter =rep(0.0,ncol(V));beta_iter[1]<-qnorm(mean(Y_obs));Vb_iter = V%*%beta_iter
+  Sig_inv_beta=diag(rep(1/1000,length(beta_iter)))
+
+  ########################################## To store posterior samples for fun
+  eta_x <- matrix(NA,K,n.keep)
+  tau <- rep(NA,n.keep)
+  phi <- rep(NA,n.keep)
+  beta = matrix(NA,length(beta_iter),n.keep)
+  ############################### create the distance matrix and correlation matrix fun.1
+  P_iter = matern(x_dist,phi=phi_iter,kappa=kap)
+  P_iter_chol = chol(P_iter)
+  P_iter_inv = chol2inv(P_iter_chol)
+
+  ############################### initialize Y_obs
+  Y[,1] = Y_obs
+  y = Y[,1]
+  id0 = (y==0)
+  id1 = (y==1)
+  
+  ###############################
+  #GIBBS SAMPLER STARTS HERE
+  iter = 1
+  ikeep = 1
+  GI = n.burn + n.thin*n.keep
+  accept.phi = 0
+
+  while(iter<=GI){
+
+  ########################################################################### update Se and Sp
+  if(est.error==TRUE){
+  ###################
+  #Sampling Se and Sp
+    PS<-matrix(0,nrow=na,ncol=4)
+   
+    res<-errorupdate(N,J,Y,Z,PS,na)
+    Se.up<-matrix(res[,1:2],na,2)
+    Sp.up<-matrix(res[,3:4],na,2)
+   
+    Se<-rbeta(na,ase+Se.up[,1],bse+Se.up[,2])
+    Sp<-rbeta(na,asp+Sp.up[,1],bsp+Sp.up[,2])
+  }
+
+    ########################################################################### update U
+    mean_iter <- eta_iter+Vb_iter
+    U_iter[id0] = rtnorm(sum(id0), mean=mean_iter[id0], sd=1, lower=-Inf, upper=0)
+    U_iter[id1] = rtnorm(sum(id1), mean=mean_iter[id1], sd=1, lower=0, upper=Inf)
+    
+    ########################################################################### update beta
+    beta_sig = solve(VtV+Sig_inv_beta);beta_mu=beta_sig%*%crossprod(V,U_iter-eta_iter)
+    beta_iter = as.numeric(rmvnorm(1,beta_mu,beta_sig))
+    Vb_iter = V%*%beta_iter
+    
+    #########################################################################################################
+	#########################################################################################################
+	
+	MU_iter <- crossprod(M_mat,U_iter-Vb_iter)
+	DP = forceSymmetric(D+P_iter_inv*tau_iter)
+	Sig_eta_iter_decomp =chol(DP) # decomposition of presicion matrix
+	Sig_eta_iter = chol2inv(Sig_eta_iter_decomp) # covariance matrix
+	mu_eta_iter = Sig_eta_iter%*%MU_iter   # mean of eta_iter
+
+	eta_x_iter = as.numeric(backsolve(Sig_eta_iter_decomp,rnorm(K))+mu_eta_iter) # sample from presicion matrix,solve uptri system
+	eta_x_iter <- eta_x_iter - mean(eta_x_iter)
+	eta_iter = as.numeric(M_mat%*%eta_x_iter)
+
+	########################################################################### update tau
+	bb = crossprod(eta_x_iter,P_iter_inv)%*%eta_x_iter/2
+	a_star=a+K/2;b_star=as.numeric(b+bb)
+	tau_iter = rgamma(1,a_star,b_star)
+
+	########################################################################### update phi in Matern covariance function
+	### using normal distribution as the proposal distribution for trphi=log(phi)
+
+	trphi_new = rnorm(1,trphi_iter,trphi_tune)
+	phi_new = (exp(trphi_new)*phi_max+phi_min)/(1+exp(trphi_new))
+	########################################################################### update the covariance matrix
+	P_new = matern(x_dist, phi= phi_new, kappa = kap)
+	P_new_chol = chol(P_new)
+	P_new_inv = chol2inv(P_new_chol)
+
+	rat1 =  -sum(log(diag(P_new_chol)))-crossprod(eta_x_iter,P_new_inv)%*%eta_x_iter/2*tau_iter
+	rat2 =  -sum(log(diag(P_iter_chol)))-bb*tau_iter
+
+	rat_2 = (phi_new-phi_min)*(phi_max-phi_new)/((phi_max-phi_iter)*(phi_iter-phi_min))
+	rat = min(1,as.numeric(exp(rat1-rat2)*rat_2))
+
+	ber_rat = rbinom(1,1,rat)
+	phi_iter = ber_rat*phi_new+(1-ber_rat)*phi_iter
+	trphi_iter = ber_rat*trphi_new + (1-ber_rat)*trphi_iter
+
+	########################################################################### update matrix
+	if(ber_rat==1){ # if phi_new was accepted, then update all matrics
+	  #P_iter = P_new 
+	  P_iter_chol = P_new_chol
+	  P_iter_inv = P_new_inv
+	}
+
+	#########################################################################################################
+	#########################################################################################################
+
+    ########################################################################### update the latent variable Y
+    #####################
+    # Sample true status Y
+    p = pnorm(as.numeric(eta_iter+Vb_iter))
+    uf<-runif(N)
+    Y[,1] = SampLatent(N,p,Y=Y,Z=Z,U=uf,se=Se, sp=Sp,na=na)
+    y = Y[,1]
+    id0 = (y==0)
+    id1 = (y==1)
+
+    if(iter>n.burn&iter%%n.thin==0){
+      beta[,ikeep] = beta_iter
+      #################### save for fun.1
+      eta_x[,ikeep] = eta_x_iter
+      tau[ikeep] = tau_iter
+      phi[ikeep] = phi_iter
+
+      if(est.error==TRUE){
+        Se.mat[,ikeep]<-Se
+        Sp.mat[,ikeep]<-Sp}
+
+      if(ikeep%%(n.keep/10)==0){
+				print(paste0("Collected ",(ikeep%/%(n.keep/10))*10,"% of required sample"))
+			}
+      ikeep = ikeep + 1
+    }
+    
+    iter = iter + 1
+    
+  } # End Gibbs sampling 
+  
+  if(est.error==TRUE){
+  return(list("Se"=Se.mat,"Sp"=Sp.mat,"eta_x"=eta_x,
+              "tau"=tau,"phi"=phi,"beta"=beta,"mcx"=mcx))}else{
+  return(list("eta_x"=eta_x,"tau"=tau,"phi"=phi,"beta"=beta,"mcx"=mcx))
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
