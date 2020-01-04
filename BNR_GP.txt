@@ -3,11 +3,18 @@
 # R function: This function fits a binary regression model to group testing 
 #             data according to the Bayesian Nonparametric Regression methods using Full Gaussian Process.
 # Input:
-# Z = A matrix of testing responses whose jth row is of the form (col1=Z_j, col2=cj, col3=assay used, 
-#			col4:col(4+cj-1)=indices of the individuals assigned to the jth pool) 
-# Y = matrix whose ith row is of the form (col1=0, col2=number of pools ith individual involved in, 
-#			col3:col(3+col2-1)=pools ith individual was assigned to)
-# Y_obs = vector of observed status inferred from testing restults
+# Z = A matrix of testing responses whose jth row is of the form (col1=Z_j, col2=cj, col3=assay used, col4:col(4+cj-1)=indices of the individuals assigned to the jth pool) 
+# X = Covariate matrix in which the ith row contains the covariate information pertaining to the ith individual
+# Y = matrix whose ith row is of the form (col1=0, col2=number of pools ith individual involved in, col3:col(3+col2-1)=pools ith individual was assigned to)
+# GI = The number of Gibbs iterates 
+# b0 = Initialization value for the regression parameters
+# na = Number of different assays being used
+# ase(bse) = prior parameters for the testing sensitivities, if these values are to be estimated, note these should be of length na (Assuming a beta prior)
+# asp(bsp) = prior parameters for the testing specificities, if these values are to be estimated, note these should be of length na (Assuming a beta prior)
+# Se = vector of sensitivity values, if known
+# Sp = vector of specificity values, if known
+# est.error = logical if FALSE function uses the known Se and Sp to fit model, if TRUE Se and Sp are estimated along with the other parameters
+# (a,R)     = The prior mean vector (a) and covariance matrix (R)
 #
 #
 # Required Packages: geoR
@@ -15,77 +22,56 @@
 #
 #
  
-Bayes.GP<-function(Z,Y,Y_obs,D_1,mcx_1,D_2,mcx_2,phi_ini, 
+Bayes.GP<-function(Z,Y,Y_obs,D,mcx,phi_ini, 
                              trphi_tune,sample.parameter,kap,na,
                              ase=rep(1,na), bse=rep(1,na), 
                              asp=rep(1,na), bsp=rep(1,na), Se=NULL, Sp=NULL, 
                              est.error=FALSE, visual=FALSE, step=50){
                              
-  phi_min_1 <- phi_ini[1,1];phi_max_1<-phi_ini[1,2]
-  phi_min_2 <- phi_ini[2,1];phi_max_2<-phi_ini[2,2]
-  
+  phi_min <- phi_ini[1];phi_max<-phi_ini[2]
+
   n.burn <- sample.parameter[1]
   n.keep <- sample.parameter[2]
   n.thin <- sample.parameter[3]
   n.step <- sample.parameter[4]
 
-  X_new_1 <- seq(lbd_1,rbd_1,by=0.01);KK_1 <- length(X_new_1)
-  X_new_2 <- seq(lbd_2,rbd_2,by=0.01);KK_2 <- length(X_new_2)
-  
   J = nrow(Z);N <- nrow(Y)
-  K_1 <- length(mcx_1); K_2 <- length(mcx_2)
+  K <- length(mcx)
 
   count_inverse <- 0;count_inverse_new <- 0
   if(est.error==TRUE){
     Se.mat<-matrix(-99,nrow=na,ncol=n.keep)
     Sp.mat<-matrix(-99,nrow=na,ncol=n.keep)
   }
+  
   #################################################### calculate the distance matrix for fun.1
-  x_dist_1 <- as.matrix(dist(mcx_1,mcx_1, method = "manhattan", diag = FALSE, upper = FALSE))
-  new_cross_dist_1 <- matrix(NA,KK_1,K_1)
-  for(j in 1:K_1){
-    new_cross_dist_1[,j] <- abs(X_new_1-mcx_1[j])
-  }
-  #################################################### calculate the distance matrix for fun.2
-  x_dist_2 <- as.matrix(dist(mcx_2,mcx_2, method = "manhattan", diag = FALSE, upper = FALSE))
-  new_cross_dist_2 <- matrix(NA,KK_2,K_2)
-  for(j in 1:K_2){
-    new_cross_dist_2[,j] <- abs(X_new_2-mcx_2[j])
-  }  
+  x_dist <- as.matrix(dist(mcx,mcx, method = "manhattan", diag = FALSE, upper = FALSE))
+
   #################################################### speficy the initial values of unknown parameters and random terms
   #eta_ini <- qnorm(mean(Y_obs))
   eta_ini <- 0
   logit <- function(x){log(x/(1-x))}
   #################################################### configure Gaussian Process for fun.1
-  eta_1_iter=rep(eta_ini,N);eta_x_1_iter = rep(eta_ini,K_1)
-  a_1=2;b_1=1;tau_1_iter = rgamma(1,a_1,b_1)
-  phi_1_iter <- (phi_min_1+phi_max_1)/2
-  trphi_1_iter <- logit((phi_1_iter-phi_min_1)/(phi_max_1-phi_min_1))
-  #################################################### configure Gaussian Process for fun.2
-  eta_2_iter=rep(eta_ini,N);eta_x_2_iter = rep(eta_ini,K_2)
-  a_2=2;b_2=1;tau_2_iter = rgamma(1,a_2,b_2)
-  phi_2_iter <- (phi_min_2+phi_max_2)/2
-  trphi_2_iter = logit((phi_2_iter-phi_min_2)/(phi_max_2-phi_min_2))
+  eta_iter=rep(eta_ini,N);eta_x_iter = rep(eta_ini,K)
+  a=2;b=1;tau_iter = rgamma(1,a,b)
+  phi_iter <- (phi_min+phi_max)/2
+  trphi_iter <- logit((phi_iter-phi_min)/(phi_max-phi_min))
+
   #########################################################################################
   U_iter = rep(0,N)
   beta_iter =rep(0.0,ncol(V));beta_iter[1]<-qnorm(mean(Y_obs));Vb_iter = V%*%beta_iter
   Sig_inv_beta=diag(rep(1/1000,length(beta_iter)))
 
-  ########################################## To store posterior samples for fun.1 and fun.2
-  eta_x_1 <- matrix(NA,K_1,n.keep); eta_x_2 <- matrix(NA,K_2,n.keep)
-  eta_new_1 <- matrix(NA,KK_1,n.keep); eta_new_2 <- matrix(NA,KK_2,n.keep)
-  tau_1 <- rep(NA,n.keep); tau_2 <- rep(NA,n.keep)
-  phi_1 <- rep(NA,n.keep); phi_2 <- rep(NA,n.keep)
+  ########################################## To store posterior samples for fun
+  eta_x <- matrix(NA,K,n.keep)
+  tau <- rep(NA,n.keep)
+  phi <- rep(NA,n.keep)
   beta = matrix(NA,length(beta_iter),n.keep)
   ############################### create the distance matrix and correlation matrix fun.1
-  P_1_iter = matern(x_dist_1,phi=phi_1_iter,kappa=kap)
-  P_1_iter_chol = chol(P_1_iter)
-  P_1_iter_inv = chol2inv(P_1_iter_chol)
-  ############################### create the distance matrix and correlation matrix fun.2
-  P_2_iter = matern(x_dist_2,phi=phi_2_iter,kappa=kap)
-  P_2_iter_chol = chol(P_2_iter)
-  P_2_iter_inv = chol2inv(P_2_iter_chol)
-  
+  P_iter = matern(x_dist,phi=phi_iter,kappa=kap)
+  P_iter_chol = chol(P_iter)
+  P_iter_inv = chol2inv(P_iter_chol)
+
   ############################### initialize Y_obs
   Y[,1] = Y_obs
   y = Y[,1]
@@ -116,49 +102,67 @@ Bayes.GP<-function(Z,Y,Y_obs,D_1,mcx_1,D_2,mcx_2,phi_ini,
   }
 
     ########################################################################### update U
-    eta_sum_iter <- eta_1_iter + eta_2_iter
-    mean_iter <- eta_sum_iter+Vb_iter
+    mean_iter <- eta_iter+Vb_iter
     U_iter[id0] = rtnorm(sum(id0), mean=mean_iter[id0], sd=1, lower=-Inf, upper=0)
     U_iter[id1] = rtnorm(sum(id1), mean=mean_iter[id1], sd=1, lower=0, upper=Inf)
     
     ########################################################################### update beta
-    beta_sig = solve(VtV+Sig_inv_beta);beta_mu=beta_sig%*%crossprod(V,U_iter-eta_sum_iter)
+    beta_sig = solve(VtV+Sig_inv_beta);beta_mu=beta_sig%*%crossprod(V,U_iter-eta_iter)
     beta_iter = as.numeric(rmvnorm(1,beta_mu,beta_sig))
     Vb_iter = V%*%beta_iter
     
-    ########################################################################### update eta for fun.1
-    eta_other_1_iter <- eta_2_iter
-    phi_set_1 <- c(phi_1_iter,trphi_1_iter,phi_min_1,phi_max_1)
-    eta.fun.1 <- Bayes.GP.FUN(eta_other_1_iter,M_mat_1,U_iter,Vb_iter,D_1,P_1_iter_inv,mcx_1,
-                              tau_1_iter,id0_mcx_1,a_1,b_1,phi_set_1,
-                              x_dist_1,P_1_iter_chol)
-    eta_x_1_iter <- eta.fun.1$eta_x
-    eta_1_iter <- eta.fun.1$eta
-    tau_1_iter <- eta.fun.1$tau
-    phi_1_iter <- eta.fun.1$phi
-    trphi_1_iter <- eta.fun.1$trphi
-    P_1_iter_inv <- eta.fun.1$P_iter_inv
-    P_1_iter_chol <- eta.fun.1$P_iter_chol
+    #########################################################################################################
+	#########################################################################################################
+	
+	MU_iter <- crossprod(M_mat,U_iter-Vb_iter)
+	DP = forceSymmetric(D+P_iter_inv*tau_iter)
+	Sig_eta_iter_decomp =chol(DP) # decomposition of presicion matrix
+	Sig_eta_iter = chol2inv(Sig_eta_iter_decomp) # covariance matrix
+	mu_eta_iter = Sig_eta_iter%*%MU_iter   # mean of eta_iter
 
-    ########################################################################### update eta for fun.2
-    eta_other_2_iter <- eta_1_iter
-    phi_set_2 <- c(phi_2_iter,trphi_2_iter,phi_min_2,phi_max_2)
-    eta.fun.2 <- Bayes.GP.FUN(eta_other_2_iter,M_mat_2,U_iter,Vb_iter,D_2,P_2_iter_inv,mcx_2,
-                              tau_2_iter,id0_mcx_2,a_2,b_2,phi_set_2,
-                              x_dist_2,P_2_iter_chol)
-    eta_x_2_iter <- eta.fun.2$eta_x
-    eta_2_iter <- eta.fun.2$eta
-    tau_2_iter <- eta.fun.2$tau
-    phi_2_iter <- eta.fun.2$phi
-    trphi_2_iter <- eta.fun.2$trphi
-    P_2_iter_inv <- eta.fun.2$P_iter_inv
-    P_2_iter_chol <- eta.fun.2$P_iter_chol
+	eta_x_iter = as.numeric(backsolve(Sig_eta_iter_decomp,rnorm(K))+mu_eta_iter) # sample from presicion matrix,solve uptri system
+	eta_x_iter <- eta_x_iter - mean(eta_x_iter)
+	eta_iter = as.numeric(M_mat%*%eta_x_iter)
 
+	########################################################################### update tau
+	bb = crossprod(eta_x_iter,P_iter_inv)%*%eta_x_iter/2
+	a_star=a+K/2;b_star=as.numeric(b+bb)
+	tau_iter = rgamma(1,a_star,b_star)
+
+	########################################################################### update phi in Matern covariance function
+	### using normal distribution as the proposal distribution for trphi=log(phi)
+
+	trphi_new = rnorm(1,trphi_iter,trphi_tune)
+	phi_new = (exp(trphi_new)*phi_max+phi_min)/(1+exp(trphi_new))
+	########################################################################### update the covariance matrix
+	P_new = matern(x_dist, phi= phi_new, kappa = kap)
+	P_new_chol = chol(P_new)
+	P_new_inv = chol2inv(P_new_chol)
+
+	rat1 =  -sum(log(diag(P_new_chol)))-crossprod(eta_x_iter,P_new_inv)%*%eta_x_iter/2*tau_iter
+	rat2 =  -sum(log(diag(P_iter_chol)))-bb*tau_iter
+
+	rat_2 = (phi_new-phi_min)*(phi_max-phi_new)/((phi_max-phi_iter)*(phi_iter-phi_min))
+	rat = min(1,as.numeric(exp(rat1-rat2)*rat_2))
+
+	ber_rat = rbinom(1,1,rat)
+	phi_iter = ber_rat*phi_new+(1-ber_rat)*phi_iter
+	trphi_iter = ber_rat*trphi_new + (1-ber_rat)*trphi_iter
+
+	########################################################################### update matrix
+	if(ber_rat==1){ # if phi_new was accepted, then update all matrics
+	  #P_iter = P_new 
+	  P_iter_chol = P_new_chol
+	  P_iter_inv = P_new_inv
+	}
+
+	#########################################################################################################
+	#########################################################################################################
 
     ########################################################################### update the latent variable Y
     #####################
     # Sample true status Y
-    p = pnorm(as.numeric(eta_1_iter+eta_2_iter+Vb_iter))
+    p = pnorm(as.numeric(eta_iter+Vb_iter))
     uf<-runif(N)
     Y[,1] = SampLatent(N,p,Y=Y,Z=Z,U=uf,se=Se, sp=Sp,na=na)
     y = Y[,1]
@@ -168,33 +172,17 @@ Bayes.GP<-function(Z,Y,Y_obs,D_1,mcx_1,D_2,mcx_2,phi_ini,
     if(iter>n.burn&iter%%n.thin==0){
       beta[,ikeep] = beta_iter
       #################### save for fun.1
-      eta_x_1[,ikeep] = eta_x_1_iter
-      tau_1[ikeep] = tau_1_iter
-      phi_1[ikeep] = phi_1_iter
-      #################### save for fun.2
-      eta_x_2[,ikeep] = eta_x_2_iter
-      tau_2[ikeep] = tau_2_iter
-      phi_2[ikeep] = phi_2_iter
-      
+      eta_x[,ikeep] = eta_x_iter
+      tau[ikeep] = tau_iter
+      phi[ikeep] = phi_iter
+
       if(est.error==TRUE){
         Se.mat[,ikeep]<-Se
         Sp.mat[,ikeep]<-Sp}
-      ############################################# Predict for fun.1
-      PP_cross_new_1 = matern(new_cross_dist_1,phi=phi_1_iter,kappa=kap)
-      CC_new_1 = PP_cross_new_1%*%P_1_iter_inv
-      AA_1 <- rep(1,KK_1)-diag(tcrossprod(CC_new_1,PP_cross_new_1))
-      AA_1[AA_1<=0] <- 0
-      eta_new_1[,ikeep] <- rnorm(KK_1,CC_new_1%*%eta_x_1_iter,AA_1/tau_1_iter)
-      ############################################# Predict for fun.2
-      PP_cross_new_2 = matern(new_cross_dist_2,phi=phi_2_iter,kappa=kap)
-      CC_new_2 = PP_cross_new_2%*%P_2_iter_inv
-      AA_2 <- rep(1,KK_2)-diag(tcrossprod(CC_new_2,PP_cross_new_2))
-      AA_2[AA_2<=0] <- 0
-      eta_new_2[,ikeep] <- rnorm(KK_2,CC_new_2%*%eta_x_2_iter,AA_2/tau_2_iter)
-			if(ikeep%%(n.keep/5)==0){
-				print(paste0("Collected ",(ikeep%/%(n.keep/5))*20,"% of required sample"))
-			}
 
+      if(ikeep%%(n.keep/10)==0){
+				print(paste0("Collected ",(ikeep%/%(n.keep/10))*10,"% of required sample"))
+			}
       ikeep = ikeep + 1
     }
     
@@ -203,12 +191,9 @@ Bayes.GP<-function(Z,Y,Y_obs,D_1,mcx_1,D_2,mcx_2,phi_ini,
   } # End Gibbs sampling 
   
   if(est.error==TRUE){
-  return(list("Se"=Se.mat,"Sp"=Sp.mat,"eta_new_1"=eta_new_1,"eta_new_2"=eta_new_2,
-              "tau_1"=tau_1,"tau_2"=tau_2,
-              "phi_1"=phi_1,"phi_2"=phi_2,"beta"=beta,"X_new_1"=X_new_1,"X_new_2"=X_new_2))}else{
-  return(list("eta_new_1"=eta_new_1,"eta_new_2"=eta_new_2,
-              "tau_1"=tau_1,"tau_2"=tau_2,
-              "phi_1"=phi_1,"phi_2"=phi_2,"beta"=beta,"X_new_1"=X_new_1,"X_new_2"=X_new_2))
+  return(list("Se"=Se.mat,"Sp"=Sp.mat,"eta_x"=eta_x,
+              "tau"=tau,"phi"=phi,"beta"=beta,"mcx"=mcx))}else{
+  return(list("eta_x"=eta_x,"tau"=tau,"phi"=phi,"beta"=beta,"mcx"=mcx))
   }
 }
 

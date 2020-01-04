@@ -153,25 +153,24 @@ sum(Z.C[,1])
 #    of pools ith individual involved in, col3:col(3+col2-1)=pools 
 #    ith individual was assigned to)
 
+
 ##############################################
 
-age    <- round(X[,1],1)
-age.st <- (age-mean(age))/sd(age)
+age<-X[,1]
+age.st<- (age-mean(age))/sd(age)
 
 # colnames(X) <- c("Age","Race_W","Risk.New.Partner","Risk.Multiple.Partner","Risk.Contact",
 # "Symptom","Specimen.Type")
 
 name.in <- c("Race_W","Risk.New.Partner","Risk.Multiple.Partner","Risk.Contact","Symptom")
-X_mat<-cbind(age.st,1,X[,name.in])
 
+X_mat<-cbind(1,age.st,X[,name.in])
 #############################################################################################
 #############################################################################################
 #############################################################################################
-# Read in needed functions Note: Set R directory to the file that conatins the necessary dlls
 
 
-source("BNR_PP.txt")
-source("Testing functions.txt")
+#source("Testing functions.txt")
 Rcpp::sourceCpp('SampLatent.cpp')
 Rcpp::sourceCpp('ErrorUpdate.cpp')
 
@@ -185,154 +184,167 @@ set.seed(100)
 ###################
 # Simulation settings
 N<-nrow(Y.C)                # Number of Individuals
-kap = 2.0                   # smooth parameter in matern function
-n.thin = 10                 # thinning parameter
-n.keep = 1000               # number of posterior sample
-n.step = 50                 # step to plot
-n.burn = 2000               # burn in 
-trphi_tune = 0.1            # tune parameter for decay parameter phi
-L = 100                     # number of knots for Gaussian Predictive Process
-x = X_mat[,1]
-lbd=min(x);rbd=max(x)       # two endpoints
-
-##########################################################################################
-
-id_eta = rep(NA,N)
-#######################################
-
-
-V = X_mat[,-1];VtV = crossprod(V,V)
-####################################################
-# Prepare data
-
-##################### to get the M_mat matrix
-##################### to get the M_mat matrix
-x <- age
-dat = data.frame(table(x))
-mcx = as.numeric(as.character(factor(dat[,1], levels = unique(dat[,1]))))
-d = as.numeric(dat[,2])
-K = length(d)
-D = Diagonal(x=d)
-for(i in 1:K){
-	id_eta[which(x==mcx[i])] = i
-}
-M_mat = Matrix(0,N,K)
-M_mat[cbind(1:N,id_eta)] = 1
-
-############################################## model 1
-x = X_mat[,1]
-
-lbd=min(x);rbd=max(x)          # two endpoints
-dat = data.frame(table(x))
-mcx = as.numeric(as.character(factor(dat[,1], levels = unique(dat[,1]))))
-
-#############################################################
-# Define the knots, calculate the three distance matrix
-#lbd <- as.numeric(sign(min(x))*(abs(trunc(min(x)*10))+1)/10)
-#rbd <- as.numeric(sign(max(x))*(abs(trunc(max(x)*10))+1)/10)  # endpoints for GPP_1
-mcw = seq(lbd,rbd,length.out=100)   # Knots for Predictive Process
-
-x_dist = as.matrix(dist(mcx,mcx, method = "manhattan", diag = FALSE, upper = FALSE))
-knots_dist = as.matrix(dist(mcw,mcw, method = "manhattan", diag = FALSE, upper = FALSE))
-
-cross_dist = matrix(NA,K,L)
-for(j in 1:L){
-	cross_dist[,j] <- abs(mcx-mcw[j])
-}
-id0_mcw <- which.min(abs(mcw))
-#############################################################
-# determine the lower and upper bound of decay parameter phi
-x_length = rbd-lbd
-phi_range = seq(0.01,100,by=0.01)
-lw = rep(NA,length(phi_range))
-up = lw
-for(i in 1:length(phi_range)){
-	lw[i] = matern(x_length*0.07,phi=phi_range[i],kappa = kap)
-	up[i] = matern(x_length*0.7,phi=phi_range[i],kappa = kap)
-}
-phi_min = phi_range[which.min(abs(lw-0.05))]
-phi_max = phi_range[which.min(abs(up-0.05))]
-phi_0 = (phi_min+phi_max)/2
-
-
-################################################################################## Dorfman Test
-################################################################################## Dorfman Test
-################################################################################## Dorfman Test
-# Formatting Dorfman testing data
-Y.C_obs <- rep(NA,N)
-Y.C_obs[Y.C[,2]==1] <- 0
-id_2 <- Y.C[,2]==2 
-Y.C_obs[id_2] <- Z.C[Y.C[id_2,4]]
-
-sum(Y.C_obs)
-
-######################################################################################
-######################################################################################
-# Data from Dorfman decoding with testing error rates unknown
+kap = 2.0              # smooth parameter in matern function
+n.thin = 10              # thinning parameter
+n.keep = 1000         # number of posterior sample
+n.step = 50             # step to plot
+n.burn = 2000         # burn in 
+V <- X_mat; VtV = crossprod(V,V)
+est.error <- TRUE
+na <- 2               # number of assay accuracy sets
 
 C.ase<-c(1,1)
 C.bse<-c(1,1)
 C.asp<-c(1,1)
 C.bsp<-c(1,1)
+ase=C.ase; bse=C.bse
+asp=C.asp; bsp=C.bsp
+##########################################################################################
+
+################################################################################## Dorfman Test
+################################################################################## Dorfman Test
+################################################################################## Dorfman Test
+# Simulates Dorfman testing
+Y.C_obs <- rep(NA,N)
+Y.C_obs[Y.C[,2]==1] <- 0
+id_2 <- Y.C[,2]==2 
+Y.C_obs[id_2] <- Z.C[Y.C[id_2,4]]
+
+Z<-Z.C; Y<-Y.C; Y_obs<-Y.C_obs
+######################################################################################
+######################################################################################
+# Data from Dorfman decoding with testing error rates known
 
 
+Y_save <- matrix(NA,N,n.keep)
+J = nrow(Z)
+N = nrow(Y)
+count_inverse = 0;count_inverse_new = 0
+if(est.error==TRUE){
+	Se.mat<-matrix(-99,nrow=na,ncol=n.keep)
+	Sp.mat<-matrix(-99,nrow=na,ncol=n.keep)
+}
 
-t3 <- proc.time()
-Res_PP_C_uninfo<-Bayes.NPReg.GT.PP(Z=Z.C, Y=Y.C, Y_obs=Y.C_obs,D,mcx,mcw,n.burn,n.keep,n.thin,n.step,trphi_tune,phi_min,phi_max,phi_0=phi_0,
-																	 kap, na=2, ase=C.ase, bse=C.bse,asp=C.asp, bsp=C.bsp, est.error=TRUE)
-t4 <- proc.time()
+############################### speficy the initial values of unknown parameters and random terms
+a=2;b=1;tau_iter = rgamma(1,a,b)
+U_iter = rep(0,N)
+beta_iter =rep(0.0,ncol(V));beta_iter[1]<-qnorm(mean(Y_obs));Vb_iter = V%*%beta_iter
+Sig_inv_beta=diag(rep(1/1000,length(beta_iter)))
+logit <- function(x){log(x/(1-x))}
+############################### create the matrix to store posterior samples
+beta = matrix(NA,length(beta_iter),n.keep)
+############################### initialize Y_obs
+Y[,1] = Y_obs
+y = Y[,1]
+id0 = (y==0)
+id1 = (y==1)
+##########################
+#GIBBS SAMPLER STARTS HERE
+iter = 1
+ikeep = 1
+GI = n.burn + n.thin*n.keep
+accept.phi = 0
 
-t4-t3
+while(iter<=GI){
+	#################################################################################
+	#################################################################################
+	#################################################################################
+	
+	########################################################################### update Se and Sp
+	if(est.error==TRUE){
+		###################
+		#Sampling Se and Sp
+		PS<-matrix(0,nrow=na,ncol=4)
+		
+		res<-errorupdate(N,J,Y,Z,PS,na)
+		Se.up<-matrix(res[,1:2],na,2)
+		Sp.up<-matrix(res[,3:4],na,2)
+		
+		Se<-rbeta(na,ase+Se.up[,1],bse+Se.up[,2])
+		Sp<-rbeta(na,asp+Sp.up[,1],bsp+Sp.up[,2])
+	}
+	
+	########################################################################### update U
+	U_iter[id0] = rtnorm(sum(id0), mean=(Vb_iter)[id0], sd=1, lower=-Inf, upper=0)
+	U_iter[id1] = rtnorm(sum(id1), mean=(Vb_iter)[id1], sd=1, lower=0, upper=Inf)
+	
+	########################################################################### update beta
+	beta_sig = solve(VtV+Sig_inv_beta);beta_mu=beta_sig%*%crossprod(V,U_iter)
+	beta_iter = as.numeric(rmvnorm(1,beta_mu,beta_sig))
+	Vb_iter = V%*%beta_iter
+	
+	########################################################################### update the latent variable Y
+	# Sample true status Y
+	p = pnorm(as.numeric(Vb_iter))
+	uf<-runif(N)
+	Y[,1] = SampLatent(N,p,Y=Y,Z=Z,U=uf,se=Se, sp=Sp,na=1)
+	y = Y[,1]
+	id0 = (y==0)
+	id1 = (y==1)
 
-save.image(file="Age_st_mean_constraint_GPP_uninform.RData")
+	if(iter>n.burn&iter%%n.thin==0){
+		
+
+		beta[,ikeep] <- beta_iter
+		Se.mat[,ikeep]<-Se
+		Sp.mat[,ikeep]<-Sp
+		Y_save[,ikeep] <- y
+		if(ikeep%%(n.keep/10)==0){
+				print(paste0("Collected ",(ikeep%/%(n.keep/10))*10,"% of required sample"))
+		}
+		ikeep <- ikeep + 1
+		
+	}
+	#print(iter)
+	iter = iter + 1
+	
+} # End Gibbs sampling 
+
+
+save.image(file="Chris_method_uninform.RData")
 
 # ====================================================================================
 ######################################################################################
 
-plot(Res_PP_C_uninfo$phi,type="l")
-
 par(mfrow=c(3,2),mar=c(2,2,2,1))
 for(i in 1:3){
-plot(Res_PP_C_uninfo$Se[i,],type="l")
-plot(Res_PP_C_uninfo$Sp[i,],type="l")
+plot(Se.mat[i,],type="l")
+plot(Sp.mat[i,],type="l")
 }
 
-par(mfrow=c(2,3),mar=c(2,2,2,1))
-for(i in 1:nrow(Res_PP_C_uninfo$beta)){
-plot(Res_PP_C_uninfo$beta[i,],type="l")
+par(mfrow=c(2,4),mar=c(2,2,2,1))
+for(i in 1:nrow(beta)){
+plot(beta[i,],type="l")
 }
 
 library(coda)
-Sep <- rbind(Res_PP_C_uninfo$Se,Res_PP_C_uninfo$Sp)
-para <- rbind(Res_PP_C_uninfo$beta,Sep)
-round(cbind(apply(Res_PP_C_uninfo$beta,1,mean),HPDinterval(as.mcmc(t(Res_PP_C_uninfo$beta)))),3)[-1,]
+Sep <- rbind(Se.mat,Sp.mat)
+para <- rbind(beta,Sep)
+round(cbind(apply(beta,1,mean),HPDinterval(as.mcmc(t(beta)))),3)[-1,]
 
 round(cbind(apply(Sep,1,mean),HPDinterval(as.mcmc(t(Sep)))),3)
-
-
-tr_beta <- c(-1.769,-0.175,0.149,0.179,0.769,0.155)
-Se.C <- c(0.942,0.947) # Female Swab, Female Urine
-Sp.C <- c(0.976,0.989) # Female Swab, Female Urine
 
 # 1: Swab Individual
 # 2: Urine Individual
 # 3: Swab Pool 
 
+#################################################################################
+# inference of age on original scale
+round(cbind(apply(para,1,mean),HPDinterval(as.mcmc(t(para))))[2,]/sd(age),3)
 
-######################################################################################## Obtain Plot
+
+xp <- sort(age.st)*sd(age)+mean(age)
+yp <- sort(age.st)*mean(beta[2,])
+
+xp <- seq(min(age),max(age),0.01)
+y0 <- xp*mean(beta[2,])/sd(age)
+yp <- y0-mean(y0)
+plot(xp,yp,type='l',lwd=2)
+lines(xp,y0)
 
 
-X_new <- (seq(min(mcx),max(mcx),by=0.01))*sd(age)+mean(age)
-KK <- length(X_new)
-eta_new <- apply(Res_PP_C_uninfo$eta_new,1,quantile,prob=c(0.5,0.025,0.975))
 
-write.csv(cbind(X_new,t(eta_new)),'Age_PP_plot.csv',row.names=F)
-
-plot(X_new,eta_new[1,])
-points(mcw*sd(age)+mean(age),apply(Res_PP_C_uninfo$eta_w,1,median),col="blue")
-
-mean(apply(Res_PP_C_uninfo$eta_new,1,median))
-
+write.csv(cbind(xp,yp),'Age_parametric_plot.csv',row.names=F)
 
 
 
