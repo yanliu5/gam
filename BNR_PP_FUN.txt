@@ -34,10 +34,13 @@ mu_eta_iter <- Sig_eta_iter%*%crossprod(C_star,MU_iter)   # mean of eta_iter
 # sample from presicion matrix,solve uptri system
 eta_w_iter <- as.numeric(backsolve(Sig_eta_iter_decomp,rnorm(L))+mu_eta_iter) 
 
-#eta_w_iter <- eta_w_iter-eta_w_iter[id0_mcw]
-eta_w_iter <- eta_w_iter-mean(eta_w_iter)
+
+#eta_w_iter <- eta_w_iter-mean(eta_w_iter)
 
 eta_x_iter <- C_star%*%eta_w_iter
+eta_w_iter <- eta_w_iter - mean(eta_x_iter)
+eta_x_iter <- eta_x_iter - mean(eta_x_iter)
+
 eta_iter = M_mat%*%eta_x_iter
 
 #################################### update tau_1

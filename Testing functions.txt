@@ -454,6 +454,150 @@ return(list("Z"=Z, "Y"=Y))
 
 
 
+#####################################################################
+# R function: This function translates the real data of Chlamydia test  
+#             to the format for model fitting. Output will be matrix
+#             X, Y and Z
+#             
+#
+# Input: 
+# Real Data
+
+format_realdata <- function(data.new){
+
+	pool.id  <- as.numeric(data.new$Pool.ID)
+	data.gts <- data.new[pool.id!="NaN",]
+	data.ind <- data.new[pool.id=="NaN",]
+
+	##################################################################
+	# Creating the design matrices
+	X.ind<-cbind(
+							 as.numeric(as.character(data.ind$Age)),  
+							 as.numeric(data.ind$Race=="W"), 
+							 as.numeric(data.ind$Risk.New.Partner=="Y"),
+							 as.numeric(data.ind$Risk.Multiple.Partner=="Y"),
+							 as.numeric(data.ind$Risk.Contact=="Y"),
+							 as.numeric(data.ind$Symptom=="Y"),
+							 as.numeric(data.ind$Specimen.Type=="Swab")
+	)
+
+
+	X.pool<-cbind(
+							 as.numeric(as.character(data.gts$Age)),  
+							 as.numeric(data.gts$Race=="W"), 
+							 as.numeric(data.gts$Risk.New.Partner=="Y"),
+							 as.numeric(data.gts$Risk.Multiple.Partner=="Y"),
+							 as.numeric(data.gts$Risk.Contact=="Y"),
+							 as.numeric(data.gts$Symptom=="Y"),
+							 as.numeric(data.gts$Specimen.Type=="Swab")
+	)
+
+	dim(X.ind)
+	X.ind[1:10,]
+	###################################################################
+	# Building the Z and Y matrice
+
+	Z.ind.C<-matrix(-99,nrow=dim(data.ind)[1],ncol=8)
+	Y.ind.C<-matrix(-99,nrow=dim(data.ind)[1],ncol=4)
+
+	Z.pool.C<-matrix(-99,nrow=dim(data.gts)[1],ncol=8)
+	Y.pool.C<-matrix(-99,nrow=dim(data.gts)[1],ncol=4)
+
+
+	##################################
+	# For GT testing
+
+	id.ind<-1:(dim(data.gts)[1])
+
+	pool.id<-unique(data.gts$Pool.ID)
+	n<-length(pool.id)
+
+	track.CT<-1
+
+
+	#############################
+	#############################
+	### For loop starts
+
+	for(i in 1:n){
+
+	temp<-data.gts[data.gts$Pool.ID==pool.id[i],]
+	temp.id<-id.ind[data.gts$Pool.ID==pool.id[i]]
+
+	CT.res <- as.numeric(temp$CT.Result=="P")
+
+	cj<-length(CT.res)
+
+	CT.retest<- sum(CT.res)>0
+
+	Z.pool.C[track.CT,1]<-CT.retest
+	Z.pool.C[track.CT,2]<-cj
+	Z.pool.C[track.CT,3]<-1 # Swab Assay
+	Z.pool.C[track.CT,4:(cj+3)]<-temp.id
+
+	Y.pool.C[temp.id,1]<-0
+	Y.pool.C[temp.id,2]<-1
+	Y.pool.C[temp.id,3]<-track.CT
+
+
+	if(CT.retest==0){
+	track.CT<-track.CT+1
+	}
+
+	if(CT.retest>0){
+	tid<-(track.CT+1):(track.CT+cj)
+	Z.pool.C[tid,1]<-CT.res
+	Z.pool.C[tid,2]<-1
+	Z.pool.C[tid,3]<-1 # Swab Assay
+	Z.pool.C[tid,4]<-temp.id
+
+	Y.pool.C[temp.id,1]<-CT.res
+	Y.pool.C[temp.id,2]<-2
+	Y.pool.C[temp.id,4]<-tid
+	track.CT<-max(tid)+1
+	}
+
+
+	}
+
+	### For loop ends
+	#############################
+	#############################
+
+
+	Z.pool.C<-Z.pool.C[1:(track.CT-1),]
+
+	ZnC<-dim(Z.pool.C)[1]
+	YnC<-dim(Y.pool.C)[1]
+
+
+	#################################
+	# For individual level testing 
+
+	Z.ind.C[,1]<-as.numeric(data.ind$CT.Result=="P") # Test outcome for Chlamydia
+	Z.ind.C[,2]<-1                                   # Pool size    
+	Z.ind.C[,3]<- as.numeric(data.ind$Specimen.Type=="Urine")+1 #Urine Assay
+	Z.ind.C[,4]<-(1:(dim(data.ind)[1]))+YnC
+
+
+	Y.ind.C[,1]<-as.numeric(data.ind$CT.Result=="P") # Initial true status
+	Y.ind.C[,2]<-1
+	Y.ind.C[,3]<-1:(dim(data.ind)[1])+ZnC
+
+
+	###################################################
+	# Putting everything together 
+
+	X<-rbind(X.pool,X.ind)
+	colnames(X) <- c("Age","Race_W","Risk.New.Partner","Risk.Multiple.Partner","Risk.Contact",
+	"Symptom","Specimen.Type")
+
+	Z.C<-rbind(Z.pool.C,Z.ind.C)
+	Y.C<-rbind(Y.pool.C,Y.ind.C)
+
+  return(list(X=X,Y=Y.C,Z=Z.C))
+
+}
 
 
 

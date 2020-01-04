@@ -1,147 +1,30 @@
 
-# This program is designed to analyze the real group testing data, obtained by Dorfman Testing algorithm
+
+#############################################################################################
+#############################################################################################
+#############################################################################################
+# Read in needed functions Note: Set R directory to the file that conatins the necessary dlls
 
 
-setwd("C:/Users/liuyanyxy/Desktop/crap/GAM/Simulate")
+source("BNR_RealData_PP.txt")
+source("Testing functions.txt")
+Rcpp::sourceCpp('SampLatent.cpp')
+Rcpp::sourceCpp('ErrorUpdate.cpp')
+
+
+library(mvtnorm);library(msm);library(ltsa);library(geoR);library(Matrix);library(coda)
+
 ##################################################################
 # Divide the data into individual and GT data sets
 
 data.new <- read.csv("Simulated_dataset.csv")
 
-pool.id  <- as.numeric(data.new$Pool.ID)
-data.gts <- data.new[pool.id!="NaN",]
-data.ind <- data.new[pool.id=="NaN",]
+dat <- format_realdata(data.new)
 
-dim(data.gts)
-dim(data.ind)
+X   = dat$X
+Y.C = dat$Y
+Z.C = dat$Z
 
-##################################################################
-# Creating the design matrices
-X.ind<-cbind(
-             as.numeric(as.character(data.ind$Age)),  
-             as.numeric(data.ind$Race=="W"), 
-             as.numeric(data.ind$Risk.New.Partner=="Y"),
-             as.numeric(data.ind$Risk.Multiple.Partner=="Y"),
-             as.numeric(data.ind$Risk.Contact=="Y"),
-             as.numeric(data.ind$Symptom=="Y"),
-             as.numeric(data.ind$Specimen.Type=="Swab")
-)
-
-
-X.pool<-cbind(
-             as.numeric(as.character(data.gts$Age)),  
-             as.numeric(data.gts$Race=="W"), 
-             as.numeric(data.gts$Risk.New.Partner=="Y"),
-             as.numeric(data.gts$Risk.Multiple.Partner=="Y"),
-             as.numeric(data.gts$Risk.Contact=="Y"),
-             as.numeric(data.gts$Symptom=="Y"),
-             as.numeric(data.gts$Specimen.Type=="Swab")
-)
-
-dim(X.ind)
-X.ind[1:10,]
-###################################################################
-# Building the Z and Y matrice
-
-Z.ind.C<-matrix(-99,nrow=dim(data.ind)[1],ncol=8)
-Y.ind.C<-matrix(-99,nrow=dim(data.ind)[1],ncol=4)
-
-Z.pool.C<-matrix(-99,nrow=dim(data.gts)[1],ncol=8)
-Y.pool.C<-matrix(-99,nrow=dim(data.gts)[1],ncol=4)
-
-
-##################################
-# For GT testing
-
-id.ind<-1:(dim(data.gts)[1])
-
-pool.id<-unique(data.gts$Pool.ID)
-n<-length(pool.id)
-
-track.CT<-1
-
-
-#############################
-#############################
-### For loop starts
-
-for(i in 1:n){
-
-temp<-data.gts[data.gts$Pool.ID==pool.id[i],]
-temp.id<-id.ind[data.gts$Pool.ID==pool.id[i]]
-
-CT.res <- as.numeric(temp$CT.Result=="P")
-
-cj<-length(CT.res)
-
-CT.retest<- sum(CT.res)>0
-
-Z.pool.C[track.CT,1]<-CT.retest
-Z.pool.C[track.CT,2]<-cj
-Z.pool.C[track.CT,3]<-1 # Swab Assay
-Z.pool.C[track.CT,4:(cj+3)]<-temp.id
-
-Y.pool.C[temp.id,1]<-0
-Y.pool.C[temp.id,2]<-1
-Y.pool.C[temp.id,3]<-track.CT
-
-
-if(CT.retest==0){
-track.CT<-track.CT+1
-}
-
-if(CT.retest>0){
-tid<-(track.CT+1):(track.CT+cj)
-Z.pool.C[tid,1]<-CT.res
-Z.pool.C[tid,2]<-1
-Z.pool.C[tid,3]<-1 # Swab Assay
-Z.pool.C[tid,4]<-temp.id
-
-Y.pool.C[temp.id,1]<-CT.res
-Y.pool.C[temp.id,2]<-2
-Y.pool.C[temp.id,4]<-tid
-track.CT<-max(tid)+1
-}
-
-
-}
-
-### For loop ends
-#############################
-#############################
-
-
-Z.pool.C<-Z.pool.C[1:(track.CT-1),]
-
-ZnC<-dim(Z.pool.C)[1]
-YnC<-dim(Y.pool.C)[1]
-
-
-#################################
-# For individual level testing 
-
-Z.ind.C[,1]<-as.numeric(data.ind$CT.Result=="P") # Test outcome for Chlamydia
-Z.ind.C[,2]<-1                                   # Pool size    
-Z.ind.C[,3]<- as.numeric(data.ind$Specimen.Type=="Urine")+1 #Urine Assay
-Z.ind.C[,4]<-(1:(dim(data.ind)[1]))+YnC
-
-
-Y.ind.C[,1]<-as.numeric(data.ind$CT.Result=="P") # Initial true status
-Y.ind.C[,2]<-1
-Y.ind.C[,3]<-1:(dim(data.ind)[1])+ZnC
-
-
-###################################################
-# Putting everything together 
-
-X<-rbind(X.pool,X.ind)
-colnames(X) <- c("Age","Race_W","Risk.New.Partner","Risk.Multiple.Partner","Risk.Contact",
-"Symptom","Specimen.Type")
-
-Z.C<-rbind(Z.pool.C,Z.ind.C)
-Y.C<-rbind(Y.pool.C,Y.ind.C)
-
-sum(Z.C[,1])
 
 # dim(X)=dim(Y.C)=dim(Y.G)
 # Z = A matrix of testing responses whose jth row is of the form 
@@ -164,19 +47,7 @@ age.st <- (age-mean(age))/sd(age)
 name.in <- c("Race_W","Risk.New.Partner","Risk.Multiple.Partner","Risk.Contact","Symptom")
 X_mat<-cbind(age.st,1,X[,name.in])
 
-#############################################################################################
-#############################################################################################
-#############################################################################################
-# Read in needed functions Note: Set R directory to the file that conatins the necessary dlls
 
-
-source("BNR_PP.txt")
-source("Testing functions.txt")
-Rcpp::sourceCpp('SampLatent.cpp')
-Rcpp::sourceCpp('ErrorUpdate.cpp')
-
-
-library(mvtnorm);library(msm);library(ltsa);library(geoR);library(Matrix);library(coda)
 ##########################################################################################
 # Specify the seed
 set.seed(100)
@@ -289,19 +160,6 @@ save.image(file="Age_st_mean_constraint_GPP_uninform.RData")
 # ====================================================================================
 ######################################################################################
 
-plot(Res_PP_C_uninfo$phi,type="l")
-
-par(mfrow=c(3,2),mar=c(2,2,2,1))
-for(i in 1:3){
-plot(Res_PP_C_uninfo$Se[i,],type="l")
-plot(Res_PP_C_uninfo$Sp[i,],type="l")
-}
-
-par(mfrow=c(2,3),mar=c(2,2,2,1))
-for(i in 1:nrow(Res_PP_C_uninfo$beta)){
-plot(Res_PP_C_uninfo$beta[i,],type="l")
-}
-
 library(coda)
 Sep <- rbind(Res_PP_C_uninfo$Se,Res_PP_C_uninfo$Sp)
 para <- rbind(Res_PP_C_uninfo$beta,Sep)
@@ -314,25 +172,5 @@ tr_beta <- c(-1.769,-0.175,0.149,0.179,0.769,0.155)
 Se.C <- c(0.942,0.947) # Female Swab, Female Urine
 Sp.C <- c(0.976,0.989) # Female Swab, Female Urine
 
-# 1: Swab Individual
+# 1: Swab Pool/Individual
 # 2: Urine Individual
-# 3: Swab Pool 
-
-
-######################################################################################## Obtain Plot
-
-
-X_new <- (seq(min(mcx),max(mcx),by=0.01))*sd(age)+mean(age)
-KK <- length(X_new)
-eta_new <- apply(Res_PP_C_uninfo$eta_new,1,quantile,prob=c(0.5,0.025,0.975))
-
-write.csv(cbind(X_new,t(eta_new)),'Age_PP_plot.csv',row.names=F)
-
-plot(X_new,eta_new[1,])
-points(mcw*sd(age)+mean(age),apply(Res_PP_C_uninfo$eta_w,1,median),col="blue")
-
-mean(apply(Res_PP_C_uninfo$eta_new,1,median))
-
-
-
-
