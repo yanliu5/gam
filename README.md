@@ -1,6 +1,6 @@
 # GAM
 
-This repository contains R programs for the article, “Generalized additive regression for group testing data,” by Yan Liu, Christopher McMahan, Joshua Tebbs, Colin Gallagher and Christopher Bilder. This article has been submitted for publication.
+This repository contains R programs for the article, “Generalized additive regression for group testing data,” by Yan Liu, Christopher McMahan, Joshua Tebbs, Colin Gallagher and Christopher Bilder. This article was accepted by *Biostatistics*.
 
 <pre>
 1. <b>main_error_known.R</b>: Reproduces <b>Table 1</b>
